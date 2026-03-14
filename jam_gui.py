@@ -5,6 +5,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+import numpy as np
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
@@ -197,6 +198,49 @@ class JamDemoApp:
         self.filtered_fig.tight_layout()
         self.source_canvas.draw()
         self.filtered_canvas.draw()
+
+    @staticmethod
+    def _decimate_idx(n: int, max_points: int = 1200) -> np.ndarray:
+        if n <= max_points:
+            return np.arange(n, dtype=np.int64)
+        return np.linspace(0, n - 1, num=max_points, dtype=np.int64)
+
+    @staticmethod
+    def _moving_average(x: np.ndarray, window: int) -> np.ndarray:
+        y = np.asarray(x, dtype=np.float64).reshape(-1)
+        if y.size == 0:
+            return y
+        w = int(max(1, window))
+        if w % 2 == 0:
+            w += 1
+        if w <= 3 or w >= y.size:
+            return y
+        kernel = np.ones(w, dtype=np.float64) / float(w)
+        return np.convolve(y, kernel, mode="same")
+
+    @staticmethod
+    def _set_smart_ylim(ax, *arrays: np.ndarray) -> None:
+        valid = [np.asarray(a, dtype=np.float64).reshape(-1) for a in arrays if np.asarray(a).size > 0]
+        if not valid:
+            return
+        y = np.concatenate(valid)
+        lo, hi = np.percentile(y, [1.0, 99.0])
+        if np.isclose(lo, hi):
+            pad = max(abs(float(lo)) * 0.2, 1e-3)
+        else:
+            pad = (hi - lo) * 0.12
+        ax.set_ylim(float(lo - pad), float(hi + pad))
+
+    @staticmethod
+    def _set_default_zoom(ax, t_ms: np.ndarray, hard_cap_ms: float = 0.32) -> None:
+        t = np.asarray(t_ms, dtype=np.float64).reshape(-1)
+        if t.size < 2:
+            return
+        span = float(t[-1] - t[0])
+        if span <= 0:
+            return
+        zoom = min(hard_cap_ms, max(0.10, span * 0.22))
+        ax.set_xlim(float(t[0]), float(t[0] + zoom))
 
     def _scan_uris(self) -> None:
         try:
@@ -502,50 +546,86 @@ class JamDemoApp:
         self.root.after(0, lambda: self._on_success(best_out_dir, best_summary))
 
     def _render_plots(self, plot_data: Dict[str, Any]) -> None:
-        t_src = plot_data["t_source_ms"]
-        src_i = plot_data["source_i"]
-        src_q = plot_data["source_q"]
-        spec_f = plot_data["spec_freq_khz"]
-        spec_p = plot_data["spec_power_db"]
-        t_x2 = plot_data["t_x2_ms"]
-        x2_i = plot_data["x2_i"]
-        x2_q = plot_data["x2_q"]
-        t_x5 = plot_data["t_x5_ms"]
-        x5 = plot_data["x5"]
+        t_src = np.asarray(plot_data["t_source_ms"], dtype=np.float64)
+        src_i = np.asarray(plot_data["source_i"], dtype=np.float64)
+        src_q = np.asarray(plot_data["source_q"], dtype=np.float64)
+        spec_f = np.asarray(plot_data["spec_freq_khz"], dtype=np.float64)
+        spec_p = np.asarray(plot_data["spec_power_db"], dtype=np.float64)
+        t_x2 = np.asarray(plot_data["t_x2_ms"], dtype=np.float64)
+        x2_i = np.asarray(plot_data["x2_i"], dtype=np.float64)
+        x2_q = np.asarray(plot_data["x2_q"], dtype=np.float64)
+        t_x5 = np.asarray(plot_data["t_x5_ms"], dtype=np.float64)
+        x5 = np.asarray(plot_data["x5"], dtype=np.float64)
+
+        idx_src = self._decimate_idx(t_src.size, max_points=1100)
+        idx_x2 = self._decimate_idx(t_x2.size, max_points=1100)
+        idx_x5 = self._decimate_idx(t_x5.size, max_points=1200)
+        idx_sp = self._decimate_idx(spec_f.size, max_points=2200)
+
+        t_src_p = t_src[idx_src]
+        src_i_p = src_i[idx_src]
+        src_q_p = src_q[idx_src]
+        t_x2_p = t_x2[idx_x2]
+        x2_i_p = x2_i[idx_x2]
+        x2_q_p = x2_q[idx_x2]
+        t_x5_p = t_x5[idx_x5]
+        x5_p = x5[idx_x5]
+        spec_f_p = spec_f[idx_sp]
+        spec_p_p = spec_p[idx_sp]
+
+        src_i_trend = self._moving_average(src_i_p, max(9, src_i_p.size // 70))
+        src_q_trend = self._moving_average(src_q_p, max(9, src_q_p.size // 70))
+        x2_i_trend = self._moving_average(x2_i_p, max(9, x2_i_p.size // 70))
+        x2_q_trend = self._moving_average(x2_q_p, max(9, x2_q_p.size // 70))
+        x5_trend = self._moving_average(x5_p, max(11, x5_p.size // 65))
+        spec_smooth = self._moving_average(spec_p_p, max(13, spec_p_p.size // 80))
 
         self.source_ax_time.clear()
-        self.source_ax_time.plot(t_src, src_i, lw=0.9, label="I")
-        self.source_ax_time.plot(t_src, src_q, lw=0.9, label="Q", alpha=0.82)
-        self.source_ax_time.set_title("Source IQ (Time)")
+        self.source_ax_time.plot(t_src_p, src_i_p, lw=0.7, alpha=0.22, color="#1f77b4")
+        self.source_ax_time.plot(t_src_p, src_q_p, lw=0.7, alpha=0.22, color="#ff7f0e")
+        self.source_ax_time.plot(t_src_p, src_i_trend, lw=1.35, color="#1f77b4", label="I")
+        self.source_ax_time.plot(t_src_p, src_q_trend, lw=1.35, color="#ff7f0e", label="Q")
+        self.source_ax_time.set_title("Source IQ (Time, clarity view)")
         self.source_ax_time.set_xlabel("Time (ms)")
         self.source_ax_time.set_ylabel("Amplitude")
-        self.source_ax_time.grid(alpha=0.28)
+        self.source_ax_time.grid(alpha=0.26)
         self.source_ax_time.legend(loc="upper right")
+        self._set_smart_ylim(self.source_ax_time, src_i_p, src_q_p)
+        self._set_default_zoom(self.source_ax_time, t_src_p, hard_cap_ms=0.28)
 
         self.source_ax_spec.clear()
-        self.source_ax_spec.plot(spec_f, spec_p, lw=0.9, color="#1f77b4")
-        self.source_ax_spec.set_title("Source Spectrum")
+        self.source_ax_spec.plot(spec_f_p, spec_p_p, lw=0.65, alpha=0.25, color="#1f77b4")
+        self.source_ax_spec.plot(spec_f_p, spec_smooth, lw=1.5, color="#1f77b4")
+        self.source_ax_spec.set_title("Source Spectrum (smoothed)")
         self.source_ax_spec.set_xlabel("Frequency (kHz)")
         self.source_ax_spec.set_ylabel("Magnitude (dB)")
-        self.source_ax_spec.grid(alpha=0.28)
+        self.source_ax_spec.grid(alpha=0.26)
+        self._set_smart_ylim(self.source_ax_spec, spec_p_p)
         self.source_fig.tight_layout()
         self.source_canvas.draw()
 
         self.filtered_ax_lpf.clear()
-        self.filtered_ax_lpf.plot(t_x2, x2_i, lw=0.9, label="I")
-        self.filtered_ax_lpf.plot(t_x2, x2_q, lw=0.9, label="Q", alpha=0.82)
-        self.filtered_ax_lpf.set_title("LPF Output (x2_lpf)")
+        self.filtered_ax_lpf.plot(t_x2_p, x2_i_p, lw=0.7, alpha=0.22, color="#1f77b4")
+        self.filtered_ax_lpf.plot(t_x2_p, x2_q_p, lw=0.7, alpha=0.22, color="#ff7f0e")
+        self.filtered_ax_lpf.plot(t_x2_p, x2_i_trend, lw=1.35, color="#1f77b4", label="I")
+        self.filtered_ax_lpf.plot(t_x2_p, x2_q_trend, lw=1.35, color="#ff7f0e", label="Q")
+        self.filtered_ax_lpf.set_title("LPF Output (x2_lpf, clarity view)")
         self.filtered_ax_lpf.set_xlabel("Time (ms)")
         self.filtered_ax_lpf.set_ylabel("Amplitude")
-        self.filtered_ax_lpf.grid(alpha=0.28)
+        self.filtered_ax_lpf.grid(alpha=0.26)
         self.filtered_ax_lpf.legend(loc="upper right")
+        self._set_smart_ylim(self.filtered_ax_lpf, x2_i_p, x2_q_p)
+        self._set_default_zoom(self.filtered_ax_lpf, t_x2_p, hard_cap_ms=0.28)
 
         self.filtered_ax_post.clear()
-        self.filtered_ax_post.plot(t_x5, x5, lw=0.9, color="#2ca02c")
-        self.filtered_ax_post.set_title("Post Demod + RRC (x5_rrc)")
+        self.filtered_ax_post.plot(t_x5_p, x5_p, lw=0.75, alpha=0.22, color="#2ca02c")
+        self.filtered_ax_post.plot(t_x5_p, x5_trend, lw=1.5, color="#2ca02c")
+        self.filtered_ax_post.set_title("Post Demod + RRC (x5_rrc, clarity view)")
         self.filtered_ax_post.set_xlabel("Time (ms)")
         self.filtered_ax_post.set_ylabel("Amplitude")
-        self.filtered_ax_post.grid(alpha=0.28)
+        self.filtered_ax_post.grid(alpha=0.26)
+        self._set_smart_ylim(self.filtered_ax_post, x5_p)
+        self._set_default_zoom(self.filtered_ax_post, t_x5_p, hard_cap_ms=0.38)
         self.filtered_fig.tight_layout()
         self.filtered_canvas.draw()
 
