@@ -1,0 +1,23 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Local outputs/artifacts
+output/
+*.log
+
+# IDE/system
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Optional local binary captures
+*.npy
