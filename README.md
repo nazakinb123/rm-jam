@@ -140,30 +140,74 @@ Artifacts per run:
 - `jam_gui.py`: GUI with transparent hardware/replay flow
 - `main.py`: CLI entrypoint
 
-## GitHub And Multi-Device
+## Other Device Local Deployment (Windows)
 
-Push this project to GitHub from current device:
+This is the recommended workflow to run the same project on another laptop/PC.
+
+### 1) Prerequisites on the new device
+
+- Install Python 3.10+ (enable `Add Python to PATH`)
+- Install Git for Windows
+- (Optional) If you will use NanoSDR/Pluto hardware mode, keep internet available for dependency install
+
+### 2) Clone repository
 
 ```powershell
-git init
-git add .
-git commit -m "init: rm jam demo project"
-git branch -M main
-git remote add origin https://github.com/<your-username>/<your-repo>.git
-git push -u origin main
+git clone https://github.com/nazakinb123/rm-jam.git
+cd rm-jam
 ```
 
-Run on another Windows device:
+### 3) Create environment and install dependencies
 
 ```powershell
-git clone https://github.com/<your-username>/<your-repo>.git
-cd <your-repo>
 .\setup_windows.ps1
+```
+
+### 4) Start GUI
+
+```powershell
 .\run_gui.ps1
 ```
 
-If you need hardware mode there too:
+### 5) Enable hardware mode (optional)
 
 ```powershell
 .\setup_windows.ps1 -Hardware
 ```
+
+Then in GUI:
+
+- Use `sim` first for quick validation
+- Use `hw-or-replay` for robust live demo
+- If hardware decode is unstable, save IQ and switch to `replay`
+
+### 6) Quick CLI validation (optional)
+
+```powershell
+.\.venv\Scripts\python.exe main.py jam-demo --level 1 --mode sim
+.\.venv\Scripts\python.exe main.py pluto-scan
+```
+
+### 7) One-click sync to GitHub (optional)
+
+```powershell
+.\sync.ps1
+```
+
+Custom commit message:
+
+```powershell
+.\sync.ps1 -Message "feat: update gui"
+```
+
+Commit only, do not push:
+
+```powershell
+.\sync.ps1 -NoPush
+```
+
+### Common issues
+
+- `fatal: not a git repository`: run commands inside `rm-jam` folder
+- `403 denied` on push: GitHub account has no write permission to repository
+- `No Pluto contexts found`: check USB/network link and rerun `python main.py pluto-scan`
